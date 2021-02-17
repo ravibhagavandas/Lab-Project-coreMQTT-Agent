@@ -19,6 +19,8 @@
     <ClCompile Include="..\..\lib\AWS\ota\source\ota_interface.c" />
     <ClCompile Include="..\..\lib\AWS\ota\source\ota_mqtt.c" />
     <ClCompile Include="..\..\lib\AWS\ota\source\portable\os\ota_os_freertos.c" />
+    <ClCompile Include="..\..\lib\FreeRTOS\coreHTTP\source\core_http_client.c" />
+    <ClCompile Include="..\..\lib\FreeRTOS\coreHTTP\source\dependency\3rdparty\http_parser\http_parser.c" />
     <ClCompile Include="..\..\lib\FreeRTOS\coreJSON\source\core_json.c" />
     <ClCompile Include="..\..\lib\FreeRTOS\freertos-kernel\event_groups.c" />
     <ClCompile Include="..\..\lib\FreeRTOS\freertos-kernel\list.c" />
@@ -71,6 +73,10 @@
   <ItemGroup>
     <ClInclude Include="..\..\lib\AWS\ota-pal\Win32\ota_pal.h" />
     <ClInclude Include="..\..\lib\AWS\ota\source\portable\os\ota_os_freertos.h" />
+    <ClInclude Include="..\..\lib\FreeRTOS\coreHTTP\source\dependency\3rdparty\http_parser\http_parser.h" />
+    <ClInclude Include="..\..\lib\FreeRTOS\coreHTTP\source\include\core_http_client.h" />
+    <ClInclude Include="..\..\lib\FreeRTOS\coreHTTP\source\include\core_http_client_private.h" />
+    <ClInclude Include="..\..\lib\FreeRTOS\coreHTTP\source\include\core_http_config_defaults.h" />
     <ClInclude Include="..\..\lib\FreeRTOS\coreJSON\source\include\core_json.h" />
     <ClInclude Include="..\..\lib\FreeRTOS\freertos-kernel\include\event_groups.h" />
     <ClInclude Include="..\..\lib\FreeRTOS\freertos-kernel\include\FreeRTOS.h" />
@@ -127,6 +133,7 @@
     <ClInclude Include="..\..\source\configuration-files\mbedtls_config.h" />
     <ClInclude Include="..\..\source\configuration-files\ota_config.h" />
     <ClInclude Include="..\..\source\subscription-manager\subscription_manager.h" />
+    <ClInclude Include="core_http_config.h" />
   </ItemGroup>
   <ItemGroup>
     <Library Include="..\..\lib\ThirdParty\WinPCap\wpcap.lib" />
@@ -184,7 +191,7 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\..\lib\AWS;..\..\lib\FreeRTOS\utilities\crypto\include;..\..\lib\AWS\ota-pal\Win32;..\..\lib\ThirdParty\tinycbor\src;..\..\lib\FreeRTOS\coreJSON\source\include;..\..\lib\AWS\ota\source\portable\os;..\..\lib\AWS\ota\source\include;..\..\lib\FreeRTOS\utilities\mbedtls_freertos;..\..\lib\FreeRTOS\utilities\backoffAlgorithm\source\include;..\..\lib\ThirdParty\mbedtls\include;..\..\lib\FreeRTOS\freertos-plus-mqtt;..\..\lib\FreeRTOS\freertos-plus-mqtt\coreMQTT\source\interface;..\..\lib\FreeRTOS\freertos-plus-mqtt\coreMQTT\source\include;..\..\lib\FreeRTOS\network_transport\freertos_plus_tcp;..\..\lib\FreeRTOS\utilities\logging;..\..\lib\FreeRTOS\freertos-plus-tcp\include;..\..\lib\FreeRTOS\network_transport\freertos_plus_tcp\using_mbedtls;..\..\lib\FreeRTOS\network_transport\freertos_plus_tcp\using_plaintext;..\..\lib\FreeRTOS\freertos-plus-tcp\portable\Compiler\MSVC;..\..\source\subscription-manager;..\..\source\configuration-files;..\..\lib\FreeRTOS\freertos-kernel\portable\MSVC-MingW;..\..\lib\FreeRTOS\freertos-kernel\include;..\..\lib\ThirdParty\WinPCap;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\lib\AWS;..\..\lib\FreeRTOS\utilities\crypto\include;..\..\lib\AWS\ota-pal\Win32;..\..\lib\ThirdParty\tinycbor\src;..\..\lib\FreeRTOS\coreJSON\source\include;..\..\lib\AWS\ota\source\portable\os;..\..\lib\AWS\ota\source\include;..\..\lib\FreeRTOS\utilities\mbedtls_freertos;..\..\lib\FreeRTOS\utilities\backoffAlgorithm\source\include;..\..\lib\ThirdParty\mbedtls\include;..\..\lib\FreeRTOS\freertos-plus-mqtt;..\..\lib\FreeRTOS\freertos-plus-mqtt\coreMQTT\source\interface;..\..\lib\FreeRTOS\freertos-plus-mqtt\coreMQTT\source\include;..\..\lib\FreeRTOS\network_transport\freertos_plus_tcp;..\..\lib\FreeRTOS\utilities\logging;..\..\lib\FreeRTOS\freertos-plus-tcp\include;..\..\lib\FreeRTOS\network_transport\freertos_plus_tcp\using_mbedtls;..\..\lib\FreeRTOS\network_transport\freertos_plus_tcp\using_plaintext;..\..\lib\FreeRTOS\freertos-plus-tcp\portable\Compiler\MSVC;..\..\source\subscription-manager;..\..\source\configuration-files;..\..\lib\FreeRTOS\freertos-kernel\portable\MSVC-MingW;..\..\lib\FreeRTOS\freertos-kernel\include;..\..\lib\ThirdParty\WinPCap;..\..\lib\FreeRTOS\coreHTTP\source\include;..\..\lib\FreeRTOS\coreHTTP\source\dependency\3rdparty\http_parser;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>MBEDTLS_CONFIG_FILE="mbedtls_config.h";WIN32;_DEBUG;_CONSOLE;_WIN32_WINNT=0x0500;WINVER=0x400;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>

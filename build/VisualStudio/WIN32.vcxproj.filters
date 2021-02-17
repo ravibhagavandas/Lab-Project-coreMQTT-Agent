@@ -133,6 +133,18 @@
     <Filter Include="Source\subscription-manager">
       <UniqueIdentifier>{ba522f10-b32d-4983-acb1-ddf9f4b3b7f0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Lib\FreeRTOS\coreHTTP">
+      <UniqueIdentifier>{9739c8a4-6671-406a-88e9-3447348c88b9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Lib\FreeRTOS\coreHTTP\include">
+      <UniqueIdentifier>{923e36eb-22b1-4a73-b585-158a8518ed82}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Lib\FreeRTOS\coreHTTP\3rdparty">
+      <UniqueIdentifier>{4bfcaaa1-df7a-42ef-ba1a-67737ef869b1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Lib\FreeRTOS\coreHTTP\3rdparty\http_parser">
+      <UniqueIdentifier>{65d8f07d-f5be-4595-be53-a0b398d83a1b}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\lib\FreeRTOS\freertos-kernel\event_groups.c">
@@ -302,6 +314,12 @@
     </ClCompile>
     <ClCompile Include="..\..\lib\FreeRTOS\freertos-plus-mqtt\agent_message.c">
       <Filter>Lib\FreeRTOS\FreeRTOS-Plus-MQTT</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\lib\FreeRTOS\coreHTTP\source\core_http_client.c">
+      <Filter>Lib\FreeRTOS\coreHTTP</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\lib\FreeRTOS\coreHTTP\source\dependency\3rdparty\http_parser\http_parser.c">
+      <Filter>Lib\FreeRTOS\coreHTTP\3rdparty\http_parser</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -478,6 +496,21 @@
     </ClInclude>
     <ClInclude Include="..\..\lib\FreeRTOS\freertos-plus-mqtt\agent_message.h">
       <Filter>Lib\FreeRTOS\FreeRTOS-Plus-MQTT</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\lib\FreeRTOS\coreHTTP\source\include\core_http_client.h">
+      <Filter>Lib\FreeRTOS\coreHTTP\include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\lib\FreeRTOS\coreHTTP\source\include\core_http_client_private.h">
+      <Filter>Lib\FreeRTOS\coreHTTP\include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\lib\FreeRTOS\coreHTTP\source\include\core_http_config_defaults.h">
+      <Filter>Lib\FreeRTOS\coreHTTP\include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\lib\FreeRTOS\coreHTTP\source\dependency\3rdparty\http_parser\http_parser.h">
+      <Filter>Lib\FreeRTOS\coreHTTP\3rdparty\http_parser</Filter>
+    </ClInclude>
+    <ClInclude Include="core_http_config.h">
+      <Filter>Configuration Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
