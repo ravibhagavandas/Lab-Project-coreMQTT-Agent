@@ -54,14 +54,11 @@
 #include "ota_config.h"
 #include "demo_config.h"
 
-/* MQTT library includes. */
-#include "freertos_mqtt_agent.h"
-
-/* Subscription manager header include. */
-#include "subscription_manager.h"
 
 /* OTA Library include. */
 #include "ota.h"
+
+#include "ota_event_buffer.h"
 
 /* OTA Library Interface include. */
 #include "ota_os_freertos.h"
@@ -97,71 +94,6 @@
  */
 #define otaexampleTASK_DELAY_MS                          ( 1000U )
 
-/**
- * @brief The maximum time for which OTA demo waits for an MQTT operation to be complete.
- * This involves receiving an acknowledgment for broker for SUBSCRIBE, UNSUBSCRIBE and non
- * QOS0 publishes.
- */
-#define otaexampleMQTT_TIMEOUT_MS                        ( 5000U )
-
-/**
- * @brief The common prefix for all OTA topics.
- *
- * Thing name is substituted with a wildcard symbol `+`. OTA agent
- * registers with MQTT broker with the thing name in the topic. This topic
- * filter is used to match incoming packet received and route them to OTA.
- * Thing name is not needed for this matching.
- */
-#define OTA_TOPIC_PREFIX                                 "$aws/things/+/"
-
-/**
- * @brief Wildcard topic filter for job notification.
- * The filter is used to match the constructed job notify topic filter from OTA agent and register
- * appropirate callback for it.
- */
-#define OTA_JOB_NOTIFY_TOPIC_FILTER                      OTA_TOPIC_PREFIX "jobs/notify-next"
-
-/**
- * @brief Length of job notification topic filter.
- */
-#define OTA_JOB_NOTIFY_TOPIC_FILTER_LENGTH               ( ( uint16_t ) ( sizeof( OTA_JOB_NOTIFY_TOPIC_FILTER ) - 1 ) )
-
-/**
- * @brief Wildcard topic filter for matching job response messages.
- * This topic filter is used to match the responses from OTA service for OTA agent job requests. THe
- * topic filter is a reserved topic which is not subscribed with MQTT broker.
- *
- */
-#define OTA_JOB_ACCEPTED_RESPONSE_TOPIC_FILTER           OTA_TOPIC_PREFIX "jobs/$next/get/accepted"
-
-/**
- * @brief Length of job accepted response topic filter.
- */
-#define OTA_JOB_ACCEPTED_RESPONSE_TOPIC_FILTER_LENGTH    ( ( uint16_t ) ( sizeof( OTA_JOB_ACCEPTED_RESPONSE_TOPIC_FILTER ) - 1 ) )
-
-
-/**
- * @brief Wildcard topic filter for matching OTA data packets.
- *  The filter is used to match the constructed data stream topic filter from OTA agent and register
- * appropirate callback for it.
- */
-#define OTA_DATA_STREAM_TOPIC_FILTER           OTA_TOPIC_PREFIX  "streams/#"
-
-/**
- * @brief Length of data stream topic filter.
- */
-#define OTA_DATA_STREAM_TOPIC_FILTER_LENGTH    ( ( uint16_t ) ( sizeof( OTA_DATA_STREAM_TOPIC_FILTER ) - 1 ) )
-
-
-/**
- * @brief Starting index of client identifier within OTA topic.
- */
-#define OTA_TOPIC_CLIENT_IDENTIFIER_START_IDX    ( 12U )
-
-/**
- * @brief Used to clear bits in a task's notification value.
- */
-#define otaexampleMAX_UINT32                     ( 0xffffffff )
 
 /**
  * @brief Task priority of OTA agent.
@@ -183,16 +115,29 @@
 #define APP_VERSION_MINOR                        9
 #define APP_VERSION_BUILD                        2
 
+
 /**
- * @brief Defines the structure to use as the command callback context in this
- * demo.
+ * @brief The function which runs the OTA agent task.
+ *
+ * The function runs the OTA Agent Event processing loop, which waits for
+ * any events for OTA agent and process them. The loop never returns until the OTA agent
+ * is shutdown. The tasks exits gracefully by freeing up all resources in the event of an
+ *  OTA agent shutdown.
+ *
+ * @param[in] pvParam Any parameters to be passed to OTA agent task.
  */
-struct CommandContext
-{
-    MQTTStatus_t xReturnStatus;
-    TaskHandle_t xTaskToNotify;
-    void * pArgs;
-};
+static void prvOTAAgentTask( void * pvParam );
+
+/**
+ * @brief The function which runs the OTA demo task.
+ *
+ * The demo task initializes the OTA agent an loops until OTA agent is shutdown.
+ * It reports OTA update statistics (which includes number of blocks received, processed and dropped),
+ * at regular intervals.
+ *
+ * @param[in] pvParam Any parameters to be passed to OTA demo task.
+ */
+static void prvOTADemoTask( void * pvParam );
 
 /**
  * @brief Function used by OTA agent to publish control messages to the MQTT broker.
@@ -210,11 +155,11 @@ struct CommandContext
  * @param[in] qos Qos for the publish.
  * @return OtaMqttSuccess if successful. Appropirate error code otherwise.
  */
-static OtaMqttStatus_t prvMQTTPublish( const char * const pacTopic,
-                                       uint16_t topicLen,
-                                       const char * pMsg,
-                                       uint32_t msgSize,
-                                       uint8_t qos );
+extern OtaMqttStatus_t vOTADemoMQTTPublish(const char* const pacTopic,
+    uint16_t topicLen,
+    const char* pMsg,
+    uint32_t msgSize,
+    uint8_t qos);
 
 /**
  * @brief Function used by OTA agent to subscribe for a control or data packet from the MQTT broker.
@@ -232,9 +177,9 @@ static OtaMqttStatus_t prvMQTTPublish( const char * const pacTopic,
  * @param[in] ucQoS Intended qos value for the messages received on this topic.
  * @return OtaMqttSuccess if successful. Appropirate error code otherwise.
  */
-static OtaMqttStatus_t prvMQTTSubscribe( const char * pTopicFilter,
-                                         uint16_t topicFilterLength,
-                                         uint8_t ucQoS );
+extern OtaMqttStatus_t vOTADemoMQTTSubscribe(const char* pTopicFilter,
+    uint16_t topicFilterLength,
+    uint8_t ucQoS);
 
 /**
  * @brief Function is used by OTA agent to unsubscribe a topicfilter from MQTT broker.
@@ -251,118 +196,9 @@ static OtaMqttStatus_t prvMQTTSubscribe( const char * pTopicFilter,
  * @return OtaMqttSuccess if successful. Appropirate error code otherwise.
  *
  */
-static OtaMqttStatus_t prvMQTTUnsubscribe( const char * pTopicFilter,
-                                           uint16_t topicFilterLength,
-                                           uint8_t ucQoS );
-
-/**
- * @brief Fetch an unused OTA event buffer from the pool.
- *
- * Demo uses a simple statically allocated array of fixed size event buffers. The
- * number of event buffers is configured by the param otaconfigMAX_NUM_OTA_DATA_BUFFERS
- * within ota_config.h. This function is used to fetch a free buffer from the pool for processing
- * by the OTA agent task. It uses a mutex for thread safe access to the pool.
- *
- * @return A pointer to an unusued buffer. NULL if there are no buffers available.
- */
-static OtaEventData_t * prvOTAEventBufferGet( void );
-
-/**
- * @brief Free an event buffer back to pool
- *
- * OTA demo uses a statically allocated array of fixed size event buffers . The
- * number of event buffers is configured by the param otaconfigMAX_NUM_OTA_DATA_BUFFERS
- * within ota_config.h. The function is used by the OTA application callback to free a buffer,
- * after OTA agent has completed processing with the event. The access to the pool is made thread safe
- * using a mutex.
- *
- * @param[in] pxBuffer Pointer to the buffer to be freed.
- */
-static void prvOTAEventBufferFree( OtaEventData_t * const pxBuffer );
-
-/**
- * @brief The function which runs the OTA agent task.
- *
- * The function runs the OTA Agent Event processing loop, which waits for
- * any events for OTA agent and process them. The loop never returns until the OTA agent
- * is shutdown. The tasks exits gracefully by freeing up all resources in the event of an
- *  OTA agent shutdown.
- *
- * @param[in] pvParam Any parameters to be passed to OTA agent task.
- */
-static void prvOTAAgentTask( void * pvParam );
-
-
-/**
- * @brief The function which runs the OTA demo task.
- *
- * The demo task initializes the OTA agent an loops until OTA agent is shutdown.
- * It reports OTA update statistics (which includes number of blocks received, processed and dropped),
- * at regular intervals.
- *
- * @param[in] pvParam Any parameters to be passed to OTA demo task.
- */
-static void prvOTADemoTask( void * pvParam );
-
-/**
- * @brief Callback invoked for firmware image chunks received from MQTT broker.
- *
- * Function gets invoked for the firmware image blocks received on OTA data stream topic.
- * The function is registered with MQTT agent's subscription manger along with the
- * topic filter for data stream. For each packet received, the
- * function fetches a free event buffer from the pool and queues the firmware image chunk for
- * OTA agent task processing.
- *
- * @param[in] pxSubscriptionContext Context which is passed unmodified from the MQTT agent.
- * @param[in] pPublishInfo Pointer to the structure containing the details of the MQTT packet.
- */
-static void prvProcessIncomingData( void * pxSubscriptionContext,
-                                    MQTTPublishInfo_t * pPublishInfo );
-
-/**
- * @brief Callback invoked for job control messages from MQTT broker.
- *
- * Callback gets invoked for any OTA job related control messages from the MQTT broker.
- * The function is registered with MQTT agent's subscription manger along with the topic filter for
- * job stream. The function fetches a free event buffer from the pool and queues the appropirate event type
- * based on the control message received.
- *
- * @param[in] pxSubscriptionContext Context which is passed unmodified from the MQTT agent.
- * @param[in] pPublishInfo Pointer to the structure containing the details of MQTT packet.
- */
-static void prvProcessIncomingJobMessage( void * pxSubscriptionContext,
-                                          MQTTPublishInfo_t * pPublishInfo );
-
-/**
- * @brief Matches a client identifier within an OTA topic.
- * This function is used to validate that topic is valid and intended for this device thing name.
- *
- * @param[in] pTopic Pointer to the topic
- * @param[in] topicNameLength length of the topic
- * @param[in] pClientIdentifier Client identifier, should be null terminated.
- * @param[in] clientIdentifierLength Length of the client identifier.
- * @return true if client identifier is found within the topic at the right index.
- */
-static bool prvMatchClientIdentifierInTopic( const char * pTopic,
-                                             size_t topicNameLength,
-                                             const char * pClientIdentifier,
-                                             size_t clientIdentifierLength );
-
-/**
- * @brief Default callback used to receive default messages for OTA.
- *
- * The callback is not subscribed with MQTT broker, but only with local subscription manager.
- * A wildcard OTA job topic is used for subscription so that all unsolicited messages related to OTA is
- * forwarded to this callback for filtration. Right now the callback is used to filter responses to job requests
- * from the OTA service.
- *
- * @param[in] pvIncomingPublishCallbackContext MQTT context which stores the connection.
- * @param[in] pPublishInfo MQTT packet that stores the information of the file block.
- *
- * @return true if the message is processed by OTA.
- */
-bool vOTAProcessMessage( void * pvIncomingPublishCallbackContext,
-                         MQTTPublishInfo_t * pxPublishInfo );
+extern OtaMqttStatus_t vOTADemoMQTTUnsubscribe(const char* pTopicFilter,
+    uint16_t topicFilterLength,
+    uint8_t ucQoS);
 
 /**
  * @brief Buffer used to store the firmware image file path.
@@ -392,26 +228,7 @@ static uint8_t decodeMem[ ( 1U << otaconfigLOG2_FILE_BLOCK_SIZE ) ];
  * @brief Application buffer used to store the bitmap for requesting firmware image
  * chunks from MQTT broker. Buffer is passed to the OTA agent during initialization.
  */
-static uint8_t bitmap[ OTA_MAX_BLOCK_BITMAP_SIZE ];
-
-/**
- * @brief A statically allocated array of event buffers used by the OTA agent.
- * Maximum number of buffers are determined by how many chunks are requested
- * by OTA agent at a time along with an extra buffer to handle control message.
- * The size of each buffer is determined by the maximum size of firmware image
- * chunk, and other metadata send along with the chunk.
- */
-static OtaEventData_t eventBuffer[ otaconfigMAX_NUM_OTA_DATA_BUFFERS ] = { 0 };
-
-/*
- * @brief Mutex used to manage thread safe access of OTA event buffers.
- */
-static SemaphoreHandle_t xBufferSemaphore;
-
-/**
- * @brief Static handle used for MQTT agent context.
- */
-extern MQTTAgentContext_t xGlobalMqttAgentContext;
+static uint8_t bitmap[OTA_MAX_BLOCK_BITMAP_SIZE];
 
 /**
  * @brief Structure containing all application allocated buffers used by the OTA agent.
@@ -440,50 +257,6 @@ const AppVersion32_t appFirmwareVersion =
     .u.x.minor = APP_VERSION_MINOR,
     .u.x.build = APP_VERSION_BUILD,
 };
-
-/*-----------------------------------------------------------*/
-
-static void prvOTAEventBufferFree( OtaEventData_t * const pxBuffer )
-{
-    if( xSemaphoreTake( xBufferSemaphore, portMAX_DELAY ) == pdTRUE )
-    {
-        pxBuffer->bufferUsed = false;
-        ( void ) xSemaphoreGive( xBufferSemaphore );
-    }
-    else
-    {
-        LogError( ( "Failed to get buffer semaphore." ) );
-    }
-}
-
-/*-----------------------------------------------------------*/
-
-static OtaEventData_t * prvOTAEventBufferGet( void )
-{
-    uint32_t ulIndex = 0;
-    OtaEventData_t * pFreeBuffer = NULL;
-
-    if( xSemaphoreTake( xBufferSemaphore, portMAX_DELAY ) == pdTRUE )
-    {
-        for( ulIndex = 0; ulIndex < otaconfigMAX_NUM_OTA_DATA_BUFFERS; ulIndex++ )
-        {
-            if( eventBuffer[ ulIndex ].bufferUsed == false )
-            {
-                eventBuffer[ ulIndex ].bufferUsed = true;
-                pFreeBuffer = &eventBuffer[ ulIndex ];
-                break;
-            }
-        }
-
-        ( void ) xSemaphoreGive( xBufferSemaphore );
-    }
-    else
-    {
-        LogError( ( "Failed to get buffer semaphore." ) );
-    }
-
-    return pFreeBuffer;
-}
 
 /*-----------------------------------------------------------*/
 static void prvOTAAgentTask( void * pvParam )
@@ -605,394 +378,6 @@ static void otaAppCallback( OtaJobEvent_t event,
 
 /*-----------------------------------------------------------*/
 
-static void prvProcessIncomingData( void * pxSubscriptionContext,
-                                    MQTTPublishInfo_t * pPublishInfo )
-{
-    configASSERT( pPublishInfo != NULL );
-
-    ( void ) pxSubscriptionContext;
-
-    OtaEventData_t * pData;
-    OtaEventMsg_t eventMsg = { 0 };
-
-    LogDebug( ( "Received OTA image block, size %d.\n\n", pPublishInfo->payloadLength ) );
-
-    configASSERT( pPublishInfo->payloadLength <= OTA_DATA_BLOCK_SIZE );
-
-    pData = prvOTAEventBufferGet();
-
-    if( pData != NULL )
-    {
-        memcpy( pData->data, pPublishInfo->pPayload, pPublishInfo->payloadLength );
-        pData->dataLength = pPublishInfo->payloadLength;
-        eventMsg.eventId = OtaAgentEventReceivedFileBlock;
-        eventMsg.pEventData = pData;
-
-        /* Send job document received event. */
-        OTA_SignalEvent( &eventMsg );
-    }
-    else
-    {
-        LogError( ( "Error: No OTA data buffers available.\r\n" ) );
-    }
-}
-
-/*-----------------------------------------------------------*/
-
-static void prvProcessIncomingJobMessage( void * pxSubscriptionContext,
-                                          MQTTPublishInfo_t * pPublishInfo )
-{
-    OtaEventData_t * pData;
-    OtaEventMsg_t eventMsg = { 0 };
-
-    ( void ) pxSubscriptionContext;
-
-    configASSERT( pPublishInfo != NULL );
-
-    LogInfo( ( "Received job message callback, size %d.\n\n", pPublishInfo->payloadLength ) );
-
-    configASSERT( pPublishInfo->payloadLength <= OTA_DATA_BLOCK_SIZE );
-
-    pData = prvOTAEventBufferGet();
-
-    if( pData != NULL )
-    {
-        memcpy( pData->data, pPublishInfo->pPayload, pPublishInfo->payloadLength );
-        pData->dataLength = pPublishInfo->payloadLength;
-        eventMsg.eventId = OtaAgentEventReceivedJobDocument;
-        eventMsg.pEventData = pData;
-
-        /* Send job document received event. */
-        OTA_SignalEvent( &eventMsg );
-    }
-    else
-    {
-        LogError( ( "Error: No OTA data buffers available.\r\n" ) );
-    }
-}
-
-
-/*-----------------------------------------------------------*/
-
-static bool prvMatchClientIdentifierInTopic( const char * pTopic,
-                                             size_t topicNameLength,
-                                             const char * pClientIdentifier,
-                                             size_t clientIdentifierLength )
-{
-    bool isMatch = false;
-    size_t idx, matchIdx = 0;
-
-    for( idx = OTA_TOPIC_CLIENT_IDENTIFIER_START_IDX; idx < topicNameLength; idx++ )
-    {
-        if( matchIdx == clientIdentifierLength )
-        {
-            if( pTopic[ idx ] == '/' )
-            {
-                isMatch = true;
-            }
-
-            break;
-        }
-        else
-        {
-            if( pClientIdentifier[ matchIdx ] != pTopic[ idx ] )
-            {
-                break;
-            }
-        }
-
-        matchIdx++;
-    }
-
-    return isMatch;
-}
-
-
-/*-----------------------------------------------------------*/
-
-bool vOTAProcessMessage( void * pvIncomingPublishCallbackContext,
-                         MQTTPublishInfo_t * pxPublishInfo )
-{
-    bool isMatch = false;
-
-    ( void ) MQTT_MatchTopic( pxPublishInfo->pTopicName,
-                              pxPublishInfo->topicNameLength,
-                              OTA_JOB_ACCEPTED_RESPONSE_TOPIC_FILTER,
-                              OTA_JOB_ACCEPTED_RESPONSE_TOPIC_FILTER_LENGTH,
-                              &isMatch );
-
-    if( isMatch == true )
-    {
-        /* validate thing name */
-
-        isMatch = prvMatchClientIdentifierInTopic( pxPublishInfo->pTopicName,
-                                                   pxPublishInfo->topicNameLength,
-                                                   democonfigCLIENT_IDENTIFIER,
-                                                   strlen( democonfigCLIENT_IDENTIFIER ) );
-
-        if( isMatch == true )
-        {
-            prvProcessIncomingJobMessage( pvIncomingPublishCallbackContext, pxPublishInfo );
-        }
-    }
-
-    if( isMatch == false )
-    {
-        ( void ) MQTT_MatchTopic( pxPublishInfo->pTopicName,
-                                  pxPublishInfo->topicNameLength,
-                                  OTA_JOB_NOTIFY_TOPIC_FILTER,
-                                  OTA_JOB_NOTIFY_TOPIC_FILTER_LENGTH,
-                                  &isMatch );
-
-        if( isMatch == true )
-        {
-            prvProcessIncomingJobMessage( pvIncomingPublishCallbackContext, pxPublishInfo );
-        }
-    }
-
-    if( isMatch == false )
-    {
-        ( void ) MQTT_MatchTopic( pxPublishInfo->pTopicName,
-                                  pxPublishInfo->topicNameLength,
-                                  OTA_DATA_STREAM_TOPIC_FILTER,
-                                  OTA_DATA_STREAM_TOPIC_FILTER_LENGTH,
-                                  &isMatch );
-
-        if( isMatch == true )
-        {
-            prvProcessIncomingData( pvIncomingPublishCallbackContext, pxPublishInfo );
-        }
-    }
-
-    return isMatch;
-}
-
-/*-----------------------------------------------------------*/
-
-static void prvCommandCallback( CommandContext_t * pCommandContext,
-                                MQTTAgentReturnInfo_t * pxReturnInfo )
-{
-    pCommandContext->xReturnStatus = pxReturnInfo->returnCode;
-
-    if( pCommandContext->xTaskToNotify != NULL )
-    {
-        xTaskNotify( pCommandContext->xTaskToNotify, ( uint32_t ) ( pxReturnInfo->returnCode ), eSetValueWithOverwrite );
-    }
-}
-
-/*-----------------------------------------------------------*/
-
-
-/*-----------------------------------------------------------*/
-
-static OtaMqttStatus_t prvMQTTSubscribe( const char * pTopicFilter,
-                                         uint16_t topicFilterLength,
-                                         uint8_t ucQoS )
-{
-    MQTTStatus_t mqttStatus;
-    uint32_t ulNotifiedValue;
-    MQTTAgentSubscribeArgs_t xSubscribeArgs = { 0 };
-    MQTTSubscribeInfo_t xSubscribeInfo = { 0 };
-    BaseType_t result;
-    CommandInfo_t xCommandParams = { 0 };
-    CommandContext_t xApplicationDefinedContext = { 0 };
-    OtaMqttStatus_t otaRet = OtaMqttSuccess;
-
-    configASSERT( pTopicFilter != NULL );
-    configASSERT( topicFilterLength > 0 );
-
-    xSubscribeInfo.pTopicFilter = pTopicFilter;
-    xSubscribeInfo.topicFilterLength = topicFilterLength;
-    xSubscribeInfo.qos = ucQoS;
-    xSubscribeArgs.pSubscribeInfo = &xSubscribeInfo;
-    xSubscribeArgs.numSubscriptions = 1;
-
-    xApplicationDefinedContext.xTaskToNotify = xTaskGetCurrentTaskHandle();
-
-    xCommandParams.blockTimeMs = otaexampleMQTT_TIMEOUT_MS;
-    xCommandParams.cmdCompleteCallback = prvCommandCallback;
-    xCommandParams.pCmdCompleteCallbackContext = ( void * ) &xApplicationDefinedContext;
-
-    xTaskNotifyStateClear( NULL );
-
-    mqttStatus = MQTTAgent_Subscribe( &xGlobalMqttAgentContext,
-                                      &xSubscribeArgs,
-                                      &xCommandParams );
-
-    /* Wait for command to complete so MQTTSubscribeInfo_t remains in scope for the
-     * duration of the command. */
-    if( mqttStatus == MQTTSuccess )
-    {
-        result = xTaskNotifyWait( 0, otaexampleMAX_UINT32, &ulNotifiedValue, pdMS_TO_TICKS( otaexampleMQTT_TIMEOUT_MS ) );
-
-        if( result == pdTRUE )
-        {
-            mqttStatus = xApplicationDefinedContext.xReturnStatus;
-        }
-        else
-        {
-            mqttStatus = MQTTRecvFailed;
-        }
-    }
-
-    if( mqttStatus != MQTTSuccess )
-    {
-        LogError( ( "Failed to SUBSCRIBE to topic with error = %u.",
-                    mqttStatus ) );
-
-        otaRet = OtaMqttSubscribeFailed;
-    }
-    else
-    {
-        LogInfo( ( "Subscribed to topic %.*s.\n\n",
-                   topicFilterLength,
-                   pTopicFilter ) );
-
-        otaRet = OtaMqttSuccess;
-    }
-
-    return otaRet;
-}
-
-static OtaMqttStatus_t prvMQTTPublish( const char * const pacTopic,
-                                       uint16_t topicLen,
-                                       const char * pMsg,
-                                       uint32_t msgSize,
-                                       uint8_t qos )
-{
-    OtaMqttStatus_t otaRet = OtaMqttSuccess;
-    BaseType_t result;
-    MQTTStatus_t mqttStatus = MQTTBadParameter;
-    MQTTPublishInfo_t publishInfo = { 0 };
-    CommandInfo_t xCommandParams = { 0 };
-    CommandContext_t xCommandContext = { 0 };
-
-    publishInfo.pTopicName = pacTopic;
-    publishInfo.topicNameLength = topicLen;
-    publishInfo.qos = qos;
-    publishInfo.pPayload = pMsg;
-    publishInfo.payloadLength = msgSize;
-
-    xCommandContext.xTaskToNotify = xTaskGetCurrentTaskHandle();
-    xTaskNotifyStateClear( NULL );
-
-    xCommandParams.blockTimeMs = otaexampleMQTT_TIMEOUT_MS;
-    xCommandParams.cmdCompleteCallback = prvCommandCallback;
-    xCommandParams.pCmdCompleteCallbackContext = ( void * ) &xCommandContext;
-
-    mqttStatus = MQTTAgent_Publish( &xGlobalMqttAgentContext,
-                                    &publishInfo,
-                                    &xCommandParams );
-
-    /* Wait for command to complete so MQTTSubscribeInfo_t remains in scope for the
-     * duration of the command. */
-    if( mqttStatus == MQTTSuccess )
-    {
-        result = xTaskNotifyWait( 0, otaexampleMAX_UINT32, NULL, pdMS_TO_TICKS( otaexampleMQTT_TIMEOUT_MS ) );
-
-        if( result != pdTRUE )
-        {
-            mqttStatus = MQTTSendFailed;
-        }
-        else
-        {
-            mqttStatus = xCommandContext.xReturnStatus;
-        }
-    }
-
-    if( mqttStatus != MQTTSuccess )
-    {
-        LogError( ( "Failed to send PUBLISH packet to broker with error = %u.", mqttStatus ) );
-        otaRet = OtaMqttPublishFailed;
-    }
-    else
-    {
-        LogInfo( ( "Sent PUBLISH packet to broker %.*s to broker.\n\n",
-                   topicLen,
-                   pacTopic ) );
-
-        otaRet = OtaMqttSuccess;
-    }
-
-    return otaRet;
-}
-
-static OtaMqttStatus_t prvMQTTUnsubscribe( const char * pTopicFilter,
-                                           uint16_t topicFilterLength,
-                                           uint8_t ucQoS )
-{
-    MQTTStatus_t mqttStatus;
-    uint32_t ulNotifiedValue;
-    MQTTAgentSubscribeArgs_t xSubscribeArgs = { 0 };
-    MQTTSubscribeInfo_t xSubscribeInfo = { 0 };
-    BaseType_t result;
-    CommandInfo_t xCommandParams = { 0 };
-    CommandContext_t xApplicationDefinedContext = { 0 };
-    OtaMqttStatus_t otaRet = OtaMqttSuccess;
-
-    configASSERT( pTopicFilter != NULL );
-    configASSERT( topicFilterLength > 0 );
-
-    xSubscribeInfo.pTopicFilter = pTopicFilter;
-    xSubscribeInfo.topicFilterLength = topicFilterLength;
-    xSubscribeInfo.qos = ucQoS;
-    xSubscribeArgs.pSubscribeInfo = &xSubscribeInfo;
-    xSubscribeArgs.numSubscriptions = 1;
-
-
-    xApplicationDefinedContext.xTaskToNotify = xTaskGetCurrentTaskHandle();
-
-    xCommandParams.blockTimeMs = otaexampleMQTT_TIMEOUT_MS;
-    xCommandParams.cmdCompleteCallback = prvCommandCallback;
-    xCommandParams.pCmdCompleteCallbackContext = ( void * ) &xApplicationDefinedContext;
-
-    LogInfo( ( " Unsubscribing to topic filter: %s", pTopicFilter ) );
-    xTaskNotifyStateClear( NULL );
-
-
-    mqttStatus = MQTTAgent_Unsubscribe( &xGlobalMqttAgentContext,
-                                        &xSubscribeArgs,
-                                        &xCommandParams );
-
-    /* Wait for command to complete so MQTTSubscribeInfo_t remains in scope for the
-     * duration of the command. */
-    if( mqttStatus == MQTTSuccess )
-    {
-        result = xTaskNotifyWait( 0, otaexampleMAX_UINT32, &ulNotifiedValue, pdMS_TO_TICKS( otaexampleMQTT_TIMEOUT_MS ) );
-
-        if( result == pdTRUE )
-        {
-            mqttStatus = xApplicationDefinedContext.xReturnStatus;
-        }
-        else
-        {
-            mqttStatus = MQTTRecvFailed;
-        }
-    }
-
-    if( mqttStatus != MQTTSuccess )
-    {
-        LogError( ( "Failed to UNSUBSCRIBE from topic %.*s with error = %u.",
-                    topicFilterLength,
-                    pTopicFilter,
-                    mqttStatus ) );
-
-        otaRet = OtaMqttUnsubscribeFailed;
-    }
-    else
-    {
-        LogInfo( ( "UNSUBSCRIBED from topic %.*s.\n\n",
-                   topicFilterLength,
-                   pTopicFilter ) );
-
-        otaRet = OtaMqttSuccess;
-    }
-
-    return otaRet;
-}
-
-/*-----------------------------------------------------------*/
-
 static void setOtaInterfaces( OtaInterfaces_t * pOtaInterfaces )
 {
     configASSERT( pOtaInterfaces != NULL );
@@ -1009,9 +394,9 @@ static void setOtaInterfaces( OtaInterfaces_t * pOtaInterfaces )
     pOtaInterfaces->os.mem.free = Free_FreeRTOS;
 
     /* Initialize the OTA library MQTT Interface.*/
-    pOtaInterfaces->mqtt.subscribe = prvMQTTSubscribe;
-    pOtaInterfaces->mqtt.publish = prvMQTTPublish;
-    pOtaInterfaces->mqtt.unsubscribe = prvMQTTUnsubscribe;
+    pOtaInterfaces->mqtt.subscribe = vOTADemoMQTTSubscribe;
+    pOtaInterfaces->mqtt.publish = vOTADemoMQTTPublish;
+    pOtaInterfaces->mqtt.unsubscribe = vOTADemoMQTTUnsubscribe;
 
     /* Initialize the OTA library PAL Interface.*/
     pOtaInterfaces->pal.getPlatformImageState = otaPal_GetPlatformImageState;
@@ -1054,16 +439,9 @@ static void prvOTADemoTask( void * pvParam )
                appFirmwareVersion.u.x.build ) );
     /****************************** Init OTA Library. ******************************/
 
-    xBufferSemaphore = xSemaphoreCreateMutex();
-
-    if( xBufferSemaphore == NULL )
-    {
-        xResult = pdFAIL;
-    }
-
     if( xResult == pdPASS )
     {
-        memset( eventBuffer, 0x00, sizeof( eventBuffer ) );
+        vOTADemoEventBufferInit();
 
         if( ( otaRet = OTA_Init( &otaBuffer,
                                  &otaInterfaces,
